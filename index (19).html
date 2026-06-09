@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudySync | Free Group Study Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1rem;
+        }
+        video {
+            width: 100%;
+            border-radius: 0.75rem;
+            background-color: #1f2937;
+            transform: scaleX(-1); /* Mirror local video */
+        }
+        .remote-video {
+            transform: scaleX(1); /* Don't mirror others */
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-white font-sans min-h-screen">
+
+    <!-- Landing Page -->
+    <div id="landing" class="flex flex-col items-center justify-center min-h-screen px-4">
+        <div class="text-center mb-8">
+            <h1 class="text-5xl font-bold mb-2 text-indigo-400">StudySync</h1>
+            <p class="text-slate-400">Free, P2P Group Study & Screen Sharing</p>
+        </div>
+        
+        <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700">
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">Your Name</label>
+                <input type="text" id="userName" placeholder="Enter your name" 
+                    class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none transition">
+            </div>
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">Room ID (Create or Join)</label>
+                <input type="text" id="roomInput" placeholder="e.g. physics-101" 
+                    class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none transition">
+            </div>
+            <button id="joinBtn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-105">
+                Join Study Room
+            </button>
+        </div>
+    </div>
+
+    <!-- Room Page -->
+    <div id="room" class="hidden h-screen flex flex-col">
+        <!-- Header -->
+        <header class="bg-slate-800 p-4 flex justify-between items-center border-b border-slate-700">
+            <div>
+                <h2 class="text-xl font-bold text-indigo-400">StudySync</h2>
+                <p id="roomDisplay" class="text-xs text-slate-400"></p>
+            </div>
+            <div class="flex gap-3">
+                <button id="shareScreenBtn" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg text-sm transition">
+                    🖥️ Share Screen
+                </button>
+                <button id="leaveBtn" class="bg-red-600 hover:bg-red-500 px-4 py-2 rounded-lg text-sm transition">
+                    Leave Room
+                </button>
+            </div>
+        </header>
+
+        <!-- Video Area -->
+        <main class="flex-1 p-4 overflow-y-auto">
+            <div id="videoGrid" class="video-grid">
+                <!-- Videos will be injected here -->
+            </div>
+        </main>
+
+        <!-- Control Bar -->
+        <footer class="bg-slate-800 p-6 flex justify-center items-center gap-6 border-t border-slate-700">
+            <button id="toggleMic" class="p-4 rounded-full bg-slate-700 hover:bg-slate-600 transition">
+                🎤
+            </button>
+            <button id="toggleVideo" class="p-4 rounded-full bg-slate-700 hover:bg-slate-600 transition">
+                📹
+            </button>
+        </footer>
+    </div>
+
+    <script>
+        let peer;
+        let localStream;
+        let currentPeerId;
+        let myName;
+        let roomID;
+        const peers = {};
+
+        const landing = document.getElementById('landing');
+        const roomDiv = document.getElementById('room');
+        const videoGrid = document.getElementById('videoGrid');
+        const roomDisplay = document.getElementById('roomDisplay');
+
+        // Initial Join Logic
+        document.getElementById('joinBtn').onclick = async () => {
+            myName = document.getElementById('userName').value || 'Anonymous';
+            roomID = document.getElementById('roomInput').value;
+
+            if (!roomID) {
+                alert('Please enter a Room ID');
+                return;
+            }
+
+            try {
+                await initPeer();
+                landing.classList.add('hidden');
+                roomDiv.classList.remove('hidden');
+                roomDisplay.innerText = `Room: ${roomID} | User: ${myName}`;
+                
+                alert('Joined! To invite others, share your Peer ID which will appear in the console, or enter their Peer ID to connect.');
+                
+            } catch (err) {
+                console.error(err);
+                alert('Error joining room. Try a different ID.');
+            }
+        };
+
+        async function initPeer() {
+            const peerId = `${roomID}-${myName.replace(/\s+/g, '-').toLowerCase()}`;
+            
+            peer = new Peer(peerId);
+
+            peer.on('open', (id) => {
+                currentPeerId = id;
+                console.log('My peer ID is: ' + id);
+                setupLocalStream();
+                connectToOthers();
+            });
+
+            peer.on('call', async (call) => {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                call.answer(stream);
+                handleCall(call);
+            });
+        }
+
+        async function setupLocalStream() {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            addVideoStream('me', localStream, true);
+        }
+
+        function addVideoStream(id, stream, isLocal = false) {
+            if (document.getElementById(`video-${id}`)) return;
+
+            const container = document.createElement('div');
+            container.className = 'relative';
+            
+            const video = document.createElement('video');
+            video.id = `video-${id}`;
+            video.srcObject = stream;
+            video.autoplay = true;
+            video.playsInline = true;
+            if (!isLocal) video.classList.add('remote-video');
+
+            const label = document.createElement('div');
+            label.className = 'absolute bottom-2 left-2 bg-black/50 px-2 py-1 rounded text-xs';
+            label.innerText = isLocal ? 'You' : `Peer ${id.split('-')[1] || id}`;
+
+            container.append(video, label);
+            videoGrid.append(container);
+        }
+
+        function handleCall(call) {
+            call.on('stream', (remoteStream) => {
+                addVideoStream(call.peer, remoteStream);
+            });
+            peers[call.peer] = call;
+        }
+
+        async function connectToOthers() {
+            const otherPeer = prompt('Enter a Peer ID to connect with (or leave blank to wait for others):');
+            if (otherPeer) {
+                const call = peer.call(otherPeer, localStream);
+                handleCall(call);
+            }
+        }
+
+        // Screen Sharing Logic
+        document.getElementById('shareScreenBtn').onclick = async () => {
+            try {
+                const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                const videoTrack = screenStream.getVideoTracks()[0];
+                
+                for (const peerId in peers) {
+                    const call = peers[peerId];
+                    const sender = call.peerConnection.getSenders().find(s => s.track.kind === 'video');
+                    if (sender) sender.replaceTrack(videoTrack);
+                }
+                
+                const localVideo = document.getElementById('video-me');
+                localVideo.srcObject = screenStream;
+
+                videoTrack.onended = () => {
+                    setupLocalStream();
+                };
+            } catch (err) {
+                console.error('Error sharing screen:', err);
+            }
+        };
+
+        document.getElementById('toggleMic').onclick = () => {
+            const enabled = localStream.getAudioTracks()[0].enabled;
+            localStream.getAudioTracks()[0].enabled = !enabled;
+            document.getElementById('toggleMic').innerText = !enabled ? '🎤' : '🔇';
+        };
+
+        document.getElementById('toggleVideo').onclick = () => {
+            const enabled = localStream.getVideoTracks()[0].enabled;
+            localStream.getVideoTracks()[0].enabled = !enabled;
+            document.getElementById('toggleVideo').innerText = !enabled ? '📹' : '🚫';
+        };
+
+        document.getElementById('leaveBtn').onclick = () => {
+            location.reload();
+        };
+    </script>
+</body>
+</html>
